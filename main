@@ -1,0 +1,316 @@
+import textwrap
+from typing import List, Dict, Optional, Tuple
+
+# ----------------------------
+# Constantes do Sistema
+# ----------------------------
+LIMITE_SAQUES_DIARIOS: int = 3
+LIMITE_SAQUE_POR_OPERACAO: float = 500.00
+AGENCIA_PADRAO: str = "0001"
+
+
+# ----------------------------
+# Funções Auxiliares
+# ----------------------------
+def formatar_valor(valor: float) -> str:
+    """
+    Retorna uma string no formato de moeda brasileira com duas casas decimais.
+    Exemplo: 150.5 → "R$ 150.50"
+    """
+    return f"R$ {valor:.2f}"
+
+
+def menu_principal() -> str:
+    """
+    Exibe o menu principal e retorna a opção escolhida pelo usuário (em minúsculas).
+    """
+    texto = """
+    =================== MENU ===================
+    [d]  Depositar
+    [s]  Sacar
+    [e]  Extrato
+    [nu] Novo usuário
+    [nc] Nova conta
+    [lc] Listar contas
+    [q]  Sair
+    => """
+    return input(textwrap.dedent(texto)).strip().lower()
+
+
+def menu_conta() -> str:
+    """
+    Exibe o menu de operações internas de conta (depósito, saque, extrato, voltar) 
+    e retorna a opção escolhida (em minúsculas).
+    """
+    texto = """
+    === Operações da Conta ===
+    [d] Depositar
+    [s] Sacar
+    [e] Extrato
+    [v] Voltar ao menu principal
+    => """
+    return input(textwrap.dedent(texto)).strip().lower()
+
+
+def solicitar_valor(prompt: str) -> Optional[float]:
+    """
+    Lê um valor numérico (float) a partir do input do usuário. 
+    Retorna None se a conversão falhar ou se o valor for inválido.
+    """
+    raw = input(prompt).replace(",", ".").strip()
+    try:
+        valor = float(raw)
+    except ValueError:
+        print("\n@@@ Valor inválido. Digite um número válido. @@@")
+        return None
+    return valor if valor > 0 else None
+
+
+# ----------------------------
+# Modelagem de Estruturas
+# ----------------------------
+Usuario = Dict[str, str]
+Conta = Dict[str, object]  # {"agencia": str, "numero": int, "usuario": Usuario, "saldo": float, "extrato": List[str], "saques_realizados": int}
+
+
+# ----------------------------
+# Gerenciamento de Usuários
+# ----------------------------
+def filtrar_usuario(cpf: str, usuarios: List[Usuario]) -> Optional[Usuario]:
+    """
+    Retorna o dicionário do usuário cujo CPF coincide, ou None caso não exista.
+    """
+    for usuario in usuarios:
+        if usuario["cpf"] == cpf:
+            return usuario
+    return None
+
+
+def criar_usuario(usuarios: List[Usuario]) -> None:
+    """
+    Solicita dados de um novo usuário e adiciona à lista, se o CPF não estiver cadastrado.
+    Cada usuário tem: nome, cpf, data_nascimento e endereço.
+    """
+    print("\n=== Cadastro de Usuário ===")
+    cpf = input("Informe o CPF (somente números): ").strip()
+    if filtrar_usuario(cpf, usuarios):
+        print("\n@@@ Já existe usuário com este CPF. @@@\n")
+        return
+
+    nome = input("Informe o nome completo: ").strip()
+    data_nascimento = input("Informe a data de nascimento (DD-MM-AAAA): ").strip()
+    endereco = input("Informe o endereço (logradouro, nº - bairro - cidade/UF): ").strip()
+
+    usuarios.append({
+        "nome": nome,
+        "cpf": cpf,
+        "data_nascimento": data_nascimento,
+        "endereco": endereco
+    })
+    print("=== Usuário criado com sucesso! ===\n")
+
+
+# ----------------------------
+# Gerenciamento de Contas
+# ----------------------------
+def criar_conta(agencia: str, numero_conta: int, usuarios: List[Usuario]) -> Optional[Conta]:
+    """
+    Cria uma nova conta vinculada a um usuário existente (por CPF). 
+    Retorna o dicionário de conta se bem-sucedida, ou None caso o usuário não exista.
+    """
+    print("\n=== Criação de Conta Corrente ===")
+    cpf = input("Informe o CPF do usuário: ").strip()
+    usuario = filtrar_usuario(cpf, usuarios)
+    if not usuario:
+        print("\n@@@ Usuário não encontrado. Cadastre o usuário antes de criar a conta. @@@\n")
+        return None
+
+    conta: Conta = {
+        "agencia": agencia,
+        "numero": numero_conta,
+        "usuario": usuario,
+        "saldo": 0.0,
+        "extrato": [],
+        "saques_realizados": 0
+    }
+    print(f"=== Conta criada com sucesso! Agência: {agencia} | Conta: {numero_conta} ===\n")
+    return conta
+
+
+def listar_contas(contas: List[Conta]) -> None:
+    """
+    Exibe informações de todas as contas cadastradas (agência, número e titular).
+    """
+    if not contas:
+        print("\n@@@ Não há contas cadastradas. @@@\n")
+        return
+
+    print("\n=== Lista de Contas ===")
+    for conta in contas:
+        info = textwrap.dedent(f"""
+            Agência: {conta['agencia']}
+            Conta:   {conta['numero']}
+            Titular: {conta['usuario']['nome']}
+        """).strip()
+        print("-" * 40)
+        print(info)
+    print("-" * 40 + "\n")
+
+
+# ----------------------------
+# Operações Bancárias
+# ----------------------------
+def depositar(conta: Conta) -> None:
+    """
+    Realiza um depósito na conta, atualizando o saldo e registrando no extrato.
+    """
+    valor = solicitar_valor("Informe o valor do depósito: ")
+    if valor is None:
+        print("\n@@@ Depósito cancelado. Informe um valor válido. @@@\n")
+        return
+
+    conta["saldo"] += valor
+    conta["extrato"].append(f"Depósito:\t+ {formatar_valor(valor)}")
+    print("\n=== Depósito realizado com sucesso! ===\n")
+
+
+def sacar(conta: Conta) -> None:
+    """
+    Realiza um saque na conta, validando:
+      - saldo suficiente
+      - valor ≤ LIMITE_SAQUE_POR_OPERACAO
+      - número de saques diários < LIMITE_SAQUES_DIARIOS
+      - valor positivo
+    Atualiza saldo, extrato e contador de saques.
+    """
+    valor = solicitar_valor("Informe o valor do saque: ")
+    if valor is None:
+        print("\n@@@ Saque cancelado. Informe um valor válido. @@@\n")
+        return
+
+    saldo_atual: float = conta["saldo"]
+    saques_hoje: int = conta["saques_realizados"]
+
+    if valor > saldo_atual:
+        print("\n@@@ Operação falhou! Saldo insuficiente. @@@\n")
+    elif valor > LIMITE_SAQUE_POR_OPERACAO:
+        print(f"\n@@@ Operação falhou! O valor excede o limite de {formatar_valor(LIMITE_SAQUE_POR_OPERACAO)} por operação. @@@\n")
+    elif saques_hoje >= LIMITE_SAQUES_DIARIOS:
+        print("\n@@@ Operação falhou! Número máximo de saques diários atingido. @@@\n")
+    else:
+        conta["saldo"] -= valor
+        conta["saques_realizados"] += 1
+        conta["extrato"].append(f"Saque:\t\t- {formatar_valor(valor)}")
+        print("\n=== Saque realizado com sucesso! ===\n")
+
+
+def exibir_extrato(conta: Conta) -> None:
+    """
+    Exibe o extrato de todas as movimentações e o saldo atual da conta.
+    """
+    print("\n================ EXTRATO ================")
+    if not conta["extrato"]:
+        print("Não foram realizadas movimentações.")
+    else:
+        for linha in conta["extrato"]:
+            print(linha)
+    print(f"\nSaldo atual:\t{formatar_valor(conta['saldo'])}")
+    print("==========================================\n")
+
+
+# ----------------------------
+# Função Principal
+# ----------------------------
+def main() -> None:
+    usuarios: List[Usuario] = []
+    contas: List[Conta] = []
+    proximo_numero_conta: int = 1
+
+    print("\n=== Bem-vindo ao Py Sistema Bancário! ===\n")
+
+    while True:
+        opcao = menu_principal()
+
+        if opcao == "d":
+            if not contas:
+                print("\n@@@ Não há contas cadastradas. Crie uma conta antes de operar. @@@\n")
+                continue
+
+            # Escolher conta para depósito
+            try:
+                numero = int(input("Informe o número da conta para depósito: ").strip())
+            except ValueError:
+                print("\n@@@ Número de conta inválido. @@@\n")
+                continue
+
+            conta_encontrada = next((c for c in contas if c["numero"] == numero), None)
+            if not conta_encontrada:
+                print("\n@@@ Conta não encontrada. @@@\n")
+                continue
+
+            depositar(conta_encontrada)
+
+        elif opcao == "s":
+            if not contas:
+                print("\n@@@ Não há contas cadastradas. Crie uma conta antes de operar. @@@\n")
+                continue
+
+            # Escolher conta para saque
+            try:
+                numero = int(input("Informe o número da conta para saque: ").strip())
+            except ValueError:
+                print("\n@@@ Número de conta inválido. @@@\n")
+                continue
+
+            conta_encontrada = next((c for c in contas if c["numero"] == numero), None)
+            if not conta_encontrada:
+                print("\n@@@ Conta não encontrada. @@@\n")
+                continue
+
+            sacar(conta_encontrada)
+
+        elif opcao == "e":
+            if not contas:
+                print("\n@@@ Não há contas cadastradas. @@@\n")
+                continue
+
+            # Escolher conta para exibir extrato
+            try:
+                numero = int(input("Informe o número da conta para visualizar extrato: ").strip())
+            except ValueError:
+                print("\n@@@ Número de conta inválido. @@@\n")
+                continue
+
+            conta_encontrada = next((c for c in contas if c["numero"] == numero), None)
+            if not conta_encontrada:
+                print("\n@@@ Conta não encontrada. @@@\n")
+                continue
+
+            exibir_extrato(conta_encontrada)
+
+        elif opcao == "nu":
+            criar_usuario(usuarios)
+
+        elif opcao == "nc":
+            if not usuarios:
+                print("\n@@@ Não há usuários cadastrados. Crie um usuário antes de abrir conta. @@@\n")
+                continue
+
+            conta_nova = criar_conta(AGENCIA_PADRAO, proximo_numero_conta, usuarios)
+            if conta_nova:
+                contas.append(conta_nova)
+                proximo_numero_conta += 1
+
+        elif opcao == "lc":
+            listar_contas(contas)
+
+        elif opcao == "q":
+            print("\nObrigado por usar o Py Sistema Bancário. Até logo!\n")
+            break
+
+        else:
+            print("\n@@@ Operação inválida. Tente novamente. @@@\n")
+
+
+if __name__ == "__main__":
+    main()
